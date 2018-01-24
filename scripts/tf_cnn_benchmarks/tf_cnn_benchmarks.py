@@ -44,7 +44,7 @@ import model_config
 import variable_mgr
 from cnn_util import log_fn
 
-tf.flags.DEFINE_string('model', 'trivial', 'name of the model to run')
+tf.flags.DEFINE_string('model', 'resnet50', 'name of the model to run')
 
 # The code will first check if it's running under benchmarking mode
 # or evaluation mode, depending on FLAGS.eval:
@@ -65,7 +65,7 @@ tf.flags.DEFINE_boolean('forward_only', False, """whether use forward-only or
 tf.flags.DEFINE_boolean('print_training_accuracy', False, """whether to
                         calculate and print training accuracy during
                         training""")
-tf.flags.DEFINE_integer('batch_size', 0, 'batch size per compute device')
+tf.flags.DEFINE_integer('batch_size', 6, 'batch size per compute device')
 tf.flags.DEFINE_integer('batch_group_size', 1,
                         'number of groups of batches processed in the image '
                         'producer.')
@@ -102,13 +102,13 @@ tf.flags.DEFINE_boolean('distortions', True,
                         distortions.""")
 tf.flags.DEFINE_boolean('use_data_sets', False,
                         """Enable use of data sets for input pipeline""")
-tf.flags.DEFINE_string('local_parameter_device', 'gpu',
+tf.flags.DEFINE_string('local_parameter_device', 'cpu',
                        """Device to use as parameter server: cpu or gpu.
                           For distributed training, it can affect where caching
                           of variables happens.""")
-tf.flags.DEFINE_string('device', 'gpu',
+tf.flags.DEFINE_string('device', 'cpu',
                        """Device to use for computation: cpu or gpu""")
-tf.flags.DEFINE_string('data_format', 'NCHW',
+tf.flags.DEFINE_string('data_format', 'NHWC',
                        """Data layout to use: NHWC (TF native)
                        or NCHW (cuDNN native, requires GPU).""")
 tf.flags.DEFINE_integer('num_intra_threads', 1,
@@ -119,21 +119,21 @@ tf.flags.DEFINE_integer('num_inter_threads', 0,
                         """Number of threads to use for inter-op
                        parallelism. If set to 0, the system will pick
                        an appropriate number.""")
-tf.flags.DEFINE_string('trace_file', None,
+tf.flags.DEFINE_string('trace_file', '/tmp/trace_benchmarks',
                        """Enable TensorFlow tracing and write trace to
                        this file.""")
-tf.flags.DEFINE_string('graph_file', None,
+tf.flags.DEFINE_string('graph_file', '/tmp/graph_benchmarks',
                        """Write the model's graph definition to this
                        file. Defaults to binary format unless filename ends
                        in 'txt'.""")
 tf.flags.DEFINE_string('optimizer', 'sgd',
                        'Optimizer to use: momentum or sgd or rmsprop')
-tf.flags.DEFINE_float('learning_rate', None,
+tf.flags.DEFINE_float('learning_rate', 0.0001,
                       """Initial learning rate for training.""")
-tf.flags.DEFINE_float('num_epochs_per_decay', 0,
+tf.flags.DEFINE_float('num_epochs_per_decay', 1000,
                       """Steps after which learning rate decays. If 0,
                       the learning rate does not decay.""")
-tf.flags.DEFINE_float('learning_rate_decay_factor', 0,
+tf.flags.DEFINE_float('learning_rate_decay_factor', 0.0004,
                       """Learning rate decay factor. Decay by this factor every
                       `num_epochs_per_decay` epochs. If 0, learning rate does
                       not decay.""")
@@ -228,7 +228,7 @@ tf.flags.DEFINE_boolean('fp16_vars', False,
 #       cross_replica_sync=true. Unlike 'replicated', currently never uses
 #       nccl all-reduce for replicating within a server.
 tf.flags.DEFINE_string(
-    'variable_update', 'parameter_server',
+    'variable_update', 'distributed_replicated',
     ('The method for managing variables: '
      'parameter_server, replicated, distributed_replicated, independent'))
 tf.flags.DEFINE_boolean(
@@ -236,10 +236,10 @@ tf.flags.DEFINE_boolean(
     'Whether to use nccl all-reduce primitives where possible')
 
 # Distributed training flags.
-tf.flags.DEFINE_string('job_name', '',
+tf.flags.DEFINE_string('job_name', 'ps',
                        'One of "ps", "worker", "".  Empty for local training')
-tf.flags.DEFINE_string('ps_hosts', '', 'Comma-separated list of target hosts')
-tf.flags.DEFINE_string('worker_hosts', '',
+tf.flags.DEFINE_string('ps_hosts', '192.168.0.57:2222', 'Comma-separated list of target hosts')
+tf.flags.DEFINE_string('worker_hosts', '192.168.0.57:3333',
                        'Comma-separated list of target hosts')
 tf.flags.DEFINE_integer('task_index', 0, 'Index of task within the job')
 tf.flags.DEFINE_string('server_protocol', 'grpc', 'protocol for servers')
