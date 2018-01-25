@@ -17,7 +17,13 @@
 """
 
 from abc import abstractmethod
-import cPickle
+
+import compatible_python as cp
+if cp.python_version()==2:
+    import cPickle
+else:
+    import pickle as cPickle
+
 import os
 
 import numpy as np

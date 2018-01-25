@@ -36,8 +36,8 @@ def tensorflow_version():
   return vt[0] * 1000 + vt[1]
 
 
-def log_fn(log):
-  print(log)
+def log_fn(log, msg=''):
+  print(log + ':' + msg)
   if FLAGS.flush_stdout:
     sys.stdout.flush()
 

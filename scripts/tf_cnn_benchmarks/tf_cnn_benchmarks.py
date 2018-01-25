@@ -65,18 +65,18 @@ tf.flags.DEFINE_boolean('forward_only', False, """whether use forward-only or
 tf.flags.DEFINE_boolean('print_training_accuracy', False, """whether to
                         calculate and print training accuracy during
                         training""")
-tf.flags.DEFINE_integer('batch_size', 6, 'batch size per compute device')
+tf.flags.DEFINE_integer('batch_size', 1, 'batch size per compute device')
 tf.flags.DEFINE_integer('batch_group_size', 1,
                         'number of groups of batches processed in the image '
                         'producer.')
-tf.flags.DEFINE_integer('num_batches', 100,
+tf.flags.DEFINE_integer('num_batches', 5,
                         'number of batches to run, excluding warmup')
 tf.flags.DEFINE_integer('num_warmup_batches', None,
                         'number of batches to run before timing')
 tf.flags.DEFINE_integer('autotune_threshold', None,
                         'The autotune threshold for the models')
 tf.flags.DEFINE_integer('num_gpus', 1, 'the number of GPUs to run on')
-tf.flags.DEFINE_integer('display_every', 10,
+tf.flags.DEFINE_integer('display_every', 1,
                         """Number of local steps after which progress is printed
                         out""")
 tf.flags.DEFINE_string('data_dir', None, """Path to dataset in TFRecord format
@@ -122,7 +122,7 @@ tf.flags.DEFINE_integer('num_inter_threads', 0,
 tf.flags.DEFINE_string('trace_file', '/tmp/trace_benchmarks',
                        """Enable TensorFlow tracing and write trace to
                        this file.""")
-tf.flags.DEFINE_string('graph_file', '/tmp/graph_benchmarks',
+tf.flags.DEFINE_string('graph_file', '/tmp/graph_benchmarks.txt',
                        """Write the model's graph definition to this
                        file. Defaults to binary format unless filename ends
                        in 'txt'.""")
@@ -236,7 +236,7 @@ tf.flags.DEFINE_boolean(
     'Whether to use nccl all-reduce primitives where possible')
 
 # Distributed training flags.
-tf.flags.DEFINE_string('job_name', 'ps',
+tf.flags.DEFINE_string('job_name', 'worker',
                        'One of "ps", "worker", "".  Empty for local training')
 tf.flags.DEFINE_string('ps_hosts', '192.168.0.57:2222', 'Comma-separated list of target hosts')
 tf.flags.DEFINE_string('worker_hosts', '192.168.0.57:3333',
