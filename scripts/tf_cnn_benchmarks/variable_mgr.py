@@ -208,7 +208,7 @@ class VariableMgr(object):
       writable: whether to get a reference to the underlying variable.
 
     Returns:
-      The set of trainable vairalbes on the specified device.
+      The set of trainable variables on the specified device.
     """
     del writable
     if self.each_tower_has_variables():

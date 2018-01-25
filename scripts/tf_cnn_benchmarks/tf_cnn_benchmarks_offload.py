@@ -160,7 +160,6 @@ tf.flags.DEFINE_boolean('use_tf_layers', None, """If True, use tf.layers for
                         neural network layers. If None, use tf.layers if
                         possible. This should not affect performance or accuracy
                         in any way.""")
-
 # Performance tuning flags.
 tf.flags.DEFINE_boolean('winograd_nonfused', True,
                         """Enable/disable using the Winograd non-fused
@@ -175,7 +174,6 @@ tf.flags.DEFINE_boolean('force_gpu_compatible', True,
                         """whether to enable force_gpu_compatible in
                         GPU_Options""")
 tf.flags.DEFINE_boolean('xla', False, """whether to enable XLA""")
-
 # Performance tuning specific to MKL.
 tf.flags.DEFINE_boolean('mkl', False,
                         """If true, set MKL environment variables.""")
@@ -189,7 +187,6 @@ tf.flags.DEFINE_string('kmp_affinity', 'granularity=fine,verbose,compact,1,0',
                         units in a multiprocessor computer.""")
 tf.flags.DEFINE_integer('kmp_settings', 1,
                         """If set to 1, MKL settings will be printed.""")
-
 # fp16 flags. If --use_fp16=False, no other fp16 flags apply.
 tf.flags.DEFINE_boolean('use_fp16', False,
                         """Use 16-bit floats for certain tensors instead of
@@ -239,6 +236,7 @@ tf.flags.DEFINE_boolean(
 tf.flags.DEFINE_string('job_name', 'worker', 'One of "ps", "worker", "".  Empty for local training')
 tf.flags.DEFINE_string('ps_hosts', '192.168.0.57:2222', 'Comma-separated list of target hosts')
 tf.flags.DEFINE_string('worker_hosts', '192.168.0.57:3333', 'Comma-separated list of target hosts')
+tf.flags.DEFINE_string('offload_hosts', '192.168.0,57:6666', 'offload process network location')
 tf.flags.DEFINE_integer('task_index', 0, 'Index of task within the job')
 tf.flags.DEFINE_string('server_protocol', 'grpc', 'protocol for servers')
 tf.flags.DEFINE_boolean('cross_replica_sync', True, '')
@@ -265,7 +263,6 @@ tf.flags.DEFINE_string('result_storage', None,
                        in cbuild datastore (note: this option requires special
                        pemissions and meant to be used from cbuilds).""")
 FLAGS = tf.flags.FLAGS
-
 
 class GlobalStepWatcher(threading.Thread):
   """A helper class for globe_step.
@@ -312,14 +309,11 @@ class GlobalStepWatcher(threading.Thread):
     return ((self.finish_step - self.start_step) /
             (self.finish_time - self.start_time))
 
-
 class CheckpointNotFoundException(Exception):
   pass
 
-
 def get_data_type():
   return tf.float16 if FLAGS.use_fp16 else tf.float32
-
 
 def loss_function(logits, labels, aux_logits):
   """Loss function."""
@@ -334,7 +328,6 @@ def loss_function(logits, labels, aux_logits):
       aux_loss = 0.4 * tf.reduce_mean(aux_cross_entropy, name='aux_loss')
       loss = tf.add_n([loss, aux_loss])
   return loss
-
 
 def create_config_proto():
   """Returns session config proto."""
@@ -351,7 +344,6 @@ def create_config_proto():
         tf.OptimizerOptions.ON_1)
   return config
 
-
 def get_mode_from_flags():
   """Determine which mode this script is running."""
   if FLAGS.forward_only and FLAGS.eval:
@@ -362,7 +354,6 @@ def get_mode_from_flags():
   if FLAGS.forward_only:
     return 'forward-only'
   return 'training'
-
 
 def benchmark_one_step(sess, fetches, step, batch_size, step_train_times,
                        trace_filename, image_producer, summary_op=None):
@@ -402,7 +393,6 @@ def benchmark_one_step(sess, fetches, step, batch_size, step_train_times,
       trace_file.write(trace.generate_chrome_trace_format(show_memory=True))
   return summary_str
 
-
 def get_perf_timing_str(batch_size, step_train_times, scale=1):
   times = np.array(step_train_times)
   speeds = batch_size / times
@@ -415,7 +405,6 @@ def get_perf_timing_str(batch_size, step_train_times, scale=1):
         speed_mean, speed_uncertainty, speed_jitter)
   else:
     return 'images/sec: %.1f' % speed_mean
-
 
 def load_checkpoint(saver, sess, ckpt_dir):
   ckpt = tf.train.get_checkpoint_state(ckpt_dir)
@@ -439,7 +428,6 @@ def load_checkpoint(saver, sess, ckpt_dir):
     return global_step
   else:
     raise CheckpointNotFoundException('No checkpoint file found.')
-
 
 class BenchmarkCNN(object):
   """Class for benchmarking a cnn network."""
@@ -508,12 +496,14 @@ class BenchmarkCNN(object):
     self.job_name = FLAGS.job_name  # "" for local training
     self.ps_hosts = FLAGS.ps_hosts.split(',')
     self.worker_hosts = FLAGS.worker_hosts.split(',')
+    self.offload_hosts = FLAGS.offload_hosts.split(',')
 
     self.local_parameter_device_flag = FLAGS.local_parameter_device
     if self.job_name:
       self.task_index = FLAGS.task_index
       self.cluster = tf.train.ClusterSpec({'ps': self.ps_hosts,
-                                           'worker': self.worker_hosts})
+                                           'worker': self.worker_hosts,
+                                           'offload': self.offload_hosts})
       self.server = None
 
       if not self.server:
@@ -528,6 +518,8 @@ class BenchmarkCNN(object):
       # servers should be stored.
       num_ps = len(self.ps_hosts)
       self.sync_queue_devices = ['/job:ps/task:%s/cpu:0' % i for i in range(num_ps)]
+      num_offload = len(self.offload_hosts)
+      self.offload_devices = ['/job:offload/task:%s/cpu:0' % i for i in range(num_offload)]
     else:
       self.task_index = 0
       self.cluster = None
@@ -541,13 +533,11 @@ class BenchmarkCNN(object):
 
     # Device to use for ops that need to always run on the local worker's
     # compute device, and never on a parameter server device.
-    self.raw_devices = ['%s/%s:%i' % (worker_prefix, FLAGS.device, i)
-                        for i in xrange(self.num_gpus)]
+    self.raw_devices = ['%s/%s:%i' % (worker_prefix, FLAGS.device, i) for i in xrange(self.num_gpus)]
 
     if FLAGS.staged_vars and FLAGS.variable_update != 'parameter_server':
       raise ValueError('staged_vars for now is only supported with '
                        '--variable_update=parameter_server')
-
     if FLAGS.variable_update == 'parameter_server':
       if self.job_name:
         if not FLAGS.staged_vars:
@@ -615,11 +605,17 @@ class BenchmarkCNN(object):
     log_fn('==========')
 
   def run(self):
+    # ps
     if FLAGS.job_name == 'ps':
       log_fn('Running parameter server %s' % self.task_index)
       self.server.join()
       return
-
+    # offload
+    if FLAGS.job_name == 'offload':
+      log_fn('Running offload %s' % self.task_index)
+      self.server.join()
+      return
+    # worker
     with tf.Graph().as_default():
       if FLAGS.eval:
         self._eval_cnn()
@@ -716,13 +712,15 @@ class BenchmarkCNN(object):
       # Block all replicas until all replicas are ready for next step.
       fetches['sync_queues'] = self.add_sync_queues_and_barrier(
           'sync_queues_step_end_', [main_fetch_group])
-
+    
+    # initialize the local variables on worker
     local_var_init_op = tf.local_variables_initializer()
     variable_mgr_init_ops = [local_var_init_op]
+    # copy initialized variables from remote ps to worker
     with tf.control_dependencies([local_var_init_op]):
       variable_mgr_init_ops.extend(self.variable_mgr.get_post_init_ops())
     local_var_init_op_group = tf.group(*variable_mgr_init_ops)
-
+    
     summary_op = tf.summary.merge_all()
     is_chief = (not self.job_name or self.task_index == 0)
     summary_writer = None
@@ -733,7 +731,7 @@ class BenchmarkCNN(object):
                                              tf.get_default_graph())
 
     # We want to start the benchmark timer right after a image_producer barrier
-    # and avoids undesired wating times on barriers.
+    # and avoids undesired waiting times on barriers.
     if ((self.num_warmup_batches + len(enqueue_ops) - 1) %
         self.batch_group_size) != 0:
       self.num_warmup_batches = int(
@@ -769,7 +767,6 @@ class BenchmarkCNN(object):
         summary_op=None,
         save_model_secs=FLAGS.save_model_secs,
         summary_writer=summary_writer)
-
     step_train_times = []
     start_standard_services = (FLAGS.summary_verbosity > 0 or
                                self.dataset.queue_runner_required())
@@ -1212,11 +1209,9 @@ class BenchmarkCNN(object):
 
       return tf.group(*queue_ops)
 
-
 def store_benchmarks(names_to_values):
   if FLAGS.result_storage:
     benchmark_storage.store_benchmark(names_to_values, FLAGS.result_storage)
-
 
 def setup():
   """Sets up the environment that BenchmarkCNN should run in."""
@@ -1238,8 +1233,6 @@ def setup():
     if FLAGS.num_intra_threads > 0:
       os.environ['OMP_NUM_THREADS'] = str(FLAGS.num_intra_threads)
 
-
-
 def main(_):
   setup()
   bench = BenchmarkCNN()
@@ -1249,7 +1242,6 @@ def main(_):
 
   bench.print_info()
   bench.run()
-
 
 if __name__ == '__main__':
   tf.app.run()
