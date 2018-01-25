@@ -29,6 +29,11 @@ from tensorflow.python.ops import data_flow_ops
 
 PS_SHADOW_VAR_PREFIX = 'ps_var'
 
+# make it compatible with python 2 and 3
+import compatible_python as cp
+if cp.python_version()==2:
+  import copy # for deep copy of list
+  
 
 # To be used with custom_getter on tf.get_variable.
 class OverrideCachingDevice(object):
@@ -77,7 +82,10 @@ class OverrideToLocalVariableIfNotPsVar(object):
     if not collections:
       collections = set([tf.GraphKeys.GLOBAL_VARIABLES])
     else:
-      collections = set(collections.copy())
+      if cp.python_version()==2:
+        collections = set(copy.deepcopy(collections))
+      else:
+        collections = set(collections.copy())
     collections.remove(tf.GraphKeys.GLOBAL_VARIABLES)
     collections.add(tf.GraphKeys.LOCAL_VARIABLES)
     kwargs['collections'] = list(collections)
