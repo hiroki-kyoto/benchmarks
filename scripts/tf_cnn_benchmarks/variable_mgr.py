@@ -618,20 +618,80 @@ class VariableMgrDistributedReplicated(VariableMgr):
       new_v = tf.get_variable(my_name, dtype=v.dtype.base_dtype,
                               initializer=v.initial_value,
                               trainable=True)
-      avg_grads[i] = (g, new_v)
+      avg_grads[i] = (g, new_v) # replace device variables with ps variables
     return avg_grads
 
-  def append_apply_gradients_ops(self, gradient_state, opt,
-                                 grads, training_ops):
+  def append_apply_gradients_ops(self, gradient_state, opt, grads, training_ops):
     device_grads = gradient_state  # From 2nd result of preprocess_device_grads.
-
+    OFFLOAD_GRADIENT_PREFIX = 'olg-%s'
+    num_offload = len(self.offload_devices)
     # For each variable, apply the combined gradients for this server on
     # the parameter server, and then wait for all other servers to do
     # this.
     for i, (g, v) in enumerate(grads):
-      apply_gradient_op = opt.apply_gradients([(g, v)])
+      # create a shadow gradient variable on offload for all groups
+      offload_gradients = []
+      for k in range(num_offload):
+        og_name = (OFFLOAD_GRADIENT_PREFIX%k) + '/' + v.name
+        if og_name.endswith(':0'):
+          og_name = og_name[:-2]
+        with tf.device(self.offload_devices[k]):
+          offload_gradients.append(
+            tf.get_variable(
+              og_name,
+              dtype=v.dtype.base_dtype,
+              initializer=tf.zeros(v.shape,dtype=v.dtype.base_dtype),
+              trainable=False
+            )
+          )
+      # append worker gradient to offload
+      with tf.device(self.offload_devices[self.group_index]):
+        agg_op = offload_gradients[self.group_index].assign_add(g)
+        agg_sync_queues = [
+            tf.FIFOQueue(
+              self.group_size, 
+              [tf.bool], 
+              shapes=[[]],
+              shared_name='agg_sync_queues-v%s-o%s-n%s'%(i,self.group_index,k)
+            ) for k in range(self.group_size)
+        ]
+        # add a barrier for nodes within a group to sync the gradient aggregation
+        with tf.control_dependencies([agg_op]):
+          # enqueue ops for other nodes and dequeue for itself
+          queue_ops = []
+          token = tf.constant(False)
+          for k in range(self.group_size):
+            if k==self.node_index:
+              queue_ops.append(tf.no_op())
+            else:
+              queue_ops.append(
+                agg_sync_queues[k].enqueue(token)
+              )
+        queue_ops.append(
+          agg_sync_queues[self.node_index].dequeue_many(self.group_size-1)
+        )
+        agg_barrier = tf.group(*queue_ops)
+        # update variables on ps
+        apply_op = None
+        with tf.control_dependencies([agg_barrier]):
+          if self.node_index==0:
+            apply_op = opt.apply_gradients(
+              [(offload_gradients[self.group_index], v)]
+            )
+          else:
+            apply_op = tf.no_op()
+        # reset offload gradient
+        reset_op = None
+        with tf.control_dependencies([apply_op]):
+          if self.node_index==0:
+            reset_op = offload_gradients[self.group_index].assign(
+              tf.zeros(v.shape,dtype=v.dtype.base_dtype)
+            )
+          else:
+            reset_op = tf.no_op()
+      # add a barrier to wait for other workers to finish updating on this var
       barrier = self.benchmark_cnn.add_sync_queues_and_barrier(
-          'replicate_variable_%s' % i, [apply_gradient_op])
+          'replicate_variable_%s' % i, [reset_op])
       with tf.control_dependencies([barrier]):
         with tf.device(self.benchmark_cnn.cpu_device):
           updated_value = v.read_value()

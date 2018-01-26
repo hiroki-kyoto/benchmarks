@@ -224,12 +224,10 @@ tf.flags.DEFINE_boolean('fp16_vars', False,
 #       updated with the gradients from all servers. Only works with
 #       cross_replica_sync=true. Unlike 'replicated', currently never uses
 #       nccl all-reduce for replicating within a server.
-tf.flags.DEFINE_string(
-    'variable_update', 'distributed_replicated',
+tf.flags.DEFINE_string('variable_update', 'distributed_replicated',
     ('The method for managing variables: '
      'parameter_server, replicated, distributed_replicated, independent'))
-tf.flags.DEFINE_boolean(
-    'use_nccl', True,
+tf.flags.DEFINE_boolean('use_nccl', True,
     'Whether to use nccl all-reduce primitives where possible')
 
 # Distributed training flags.
@@ -238,6 +236,9 @@ tf.flags.DEFINE_string('ps_hosts', '192.168.0.57:2222', 'Comma-separated list of
 tf.flags.DEFINE_string('worker_hosts', '192.168.0.57:3333', 'Comma-separated list of target hosts')
 tf.flags.DEFINE_string('offload_hosts', '192.168.0,57:6666', 'offload process network location')
 tf.flags.DEFINE_integer('task_index', 0, 'Index of task within the job')
+tf.flags.DEFINE_integer('group_index', 0, 'Index of group which this process belongs to')
+tf.flags.DEFINE_integer('node_index', 0, 'Index of node in a group')
+tf.flags.DEFINE_integer('group_size', 1, 'Size of group')
 tf.flags.DEFINE_string('server_protocol', 'grpc', 'protocol for servers')
 tf.flags.DEFINE_boolean('cross_replica_sync', True, '')
 
@@ -501,6 +502,9 @@ class BenchmarkCNN(object):
     self.local_parameter_device_flag = FLAGS.local_parameter_device
     if self.job_name:
       self.task_index = FLAGS.task_index
+      self.group_index = FLAGS.group_index
+      self.node_index = FLAGS.node_index
+      self.group_size = FLAGS.group_size
       self.cluster = tf.train.ClusterSpec({'ps': self.ps_hosts,
                                            'worker': self.worker_hosts,
                                            'offload': self.offload_hosts})
@@ -1003,9 +1007,12 @@ class BenchmarkCNN(object):
                                           epsilon=FLAGS.rmsprop_epsilon)
         else:
           raise ValueError('Optimizer "%s" was not recognized', FLAGS.optimizer)
-
-        self.variable_mgr.append_apply_gradients_ops(
+        if FLAGS.variable_update != 'distributed_replicated':
+          self.variable_mgr.append_apply_gradients_ops(
             gradient_state, opt, clipped_grads, training_ops)
+    if FLAGS.variable_update == 'distributed_replicated':
+      self.variable_mgr.append_apply_gradients_ops(
+        gradient_state, opt, clipped_grads, training_ops)
     train_op = tf.group(*(training_ops + update_ops + extra_nccl_ops))
 
     with tf.device(self.cpu_device):
@@ -1208,7 +1215,7 @@ class BenchmarkCNN(object):
           sync_queues[self.task_index].dequeue_many(len(sync_queues) - 1))
 
       return tf.group(*queue_ops)
-
+      
 def store_benchmarks(names_to_values):
   if FLAGS.result_storage:
     benchmark_storage.store_benchmark(names_to_values, FLAGS.result_storage)
