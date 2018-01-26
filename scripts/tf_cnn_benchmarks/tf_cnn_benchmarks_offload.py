@@ -234,7 +234,7 @@ tf.flags.DEFINE_boolean('use_nccl', True,
 tf.flags.DEFINE_string('job_name', 'worker', 'One of "ps", "worker", "".  Empty for local training')
 tf.flags.DEFINE_string('ps_hosts', '192.168.0.57:2222', 'Comma-separated list of target hosts')
 tf.flags.DEFINE_string('worker_hosts', '192.168.0.57:3333', 'Comma-separated list of target hosts')
-tf.flags.DEFINE_string('offload_hosts', '192.168.0,57:6666', 'offload process network location')
+tf.flags.DEFINE_string('offload_hosts', '192.168.0.57:6666', 'offload process network location')
 tf.flags.DEFINE_integer('task_index', 0, 'Index of task within the job')
 tf.flags.DEFINE_integer('group_index', 0, 'Index of group which this process belongs to')
 tf.flags.DEFINE_integer('node_index', 0, 'Index of node in a group')

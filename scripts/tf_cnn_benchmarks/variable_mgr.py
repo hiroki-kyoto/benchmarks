@@ -623,8 +623,8 @@ class VariableMgrDistributedReplicated(VariableMgr):
 
   def append_apply_gradients_ops(self, gradient_state, opt, grads, training_ops):
     device_grads = gradient_state  # From 2nd result of preprocess_device_grads.
-    OFFLOAD_GRADIENT_PREFIX = 'olg-%s'
-    num_offload = len(self.offload_devices)
+    OFFLOAD_GRADIENT_PREFIX = 'offload_gradient'
+    num_offload = len(self.benchmark_cnn.offload_devices)
     # For each variable, apply the combined gradients for this server on
     # the parameter server, and then wait for all other servers to do
     # this.
@@ -632,10 +632,10 @@ class VariableMgrDistributedReplicated(VariableMgr):
       # create a shadow gradient variable on offload for all groups
       offload_gradients = []
       for k in range(num_offload):
-        og_name = (OFFLOAD_GRADIENT_PREFIX%k) + '/' + v.name
+        og_name = ((OFFLOAD_GRADIENT_PREFIX+'-%s')%k) + '/' + v.name
         if og_name.endswith(':0'):
           og_name = og_name[:-2]
-        with tf.device(self.offload_devices[k]):
+        with tf.device(self.benchmark_cnn.offload_devices[k]):
           offload_gradients.append(
             tf.get_variable(
               og_name,
@@ -645,46 +645,51 @@ class VariableMgrDistributedReplicated(VariableMgr):
             )
           )
       # append worker gradient to offload
-      with tf.device(self.offload_devices[self.group_index]):
-        agg_op = offload_gradients[self.group_index].assign_add(g)
+      with tf.device(
+        self.benchmark_cnn.offload_devices[
+          self.benchmark_cnn.group_index]):
+        agg_op = offload_gradients[
+          self.benchmark_cnn.group_index].assign_add(g)
         agg_sync_queues = [
             tf.FIFOQueue(
-              self.group_size, 
+              self.benchmark_cnn.group_size, 
               [tf.bool], 
               shapes=[[]],
-              shared_name='agg_sync_queues-v%s-o%s-n%s'%(i,self.group_index,k)
-            ) for k in range(self.group_size)
+              shared_name='agg_sync_queues-v%s-o%s-n%s'%(
+                i, self.benchmark_cnn.group_index, k)
+            ) for k in range(self.benchmark_cnn.group_size)
         ]
         # add a barrier for nodes within a group to sync the gradient aggregation
         with tf.control_dependencies([agg_op]):
           # enqueue ops for other nodes and dequeue for itself
           queue_ops = []
           token = tf.constant(False)
-          for k in range(self.group_size):
-            if k==self.node_index:
+          for k in range(self.benchmark_cnn.group_size):
+            if k==self.benchmark_cnn.node_index:
               queue_ops.append(tf.no_op())
             else:
               queue_ops.append(
                 agg_sync_queues[k].enqueue(token)
               )
         queue_ops.append(
-          agg_sync_queues[self.node_index].dequeue_many(self.group_size-1)
+          agg_sync_queues[self.benchmark_cnn.node_index].dequeue_many(
+            self.benchmark_cnn.group_size-1)
         )
         agg_barrier = tf.group(*queue_ops)
         # update variables on ps
         apply_op = None
         with tf.control_dependencies([agg_barrier]):
-          if self.node_index==0:
+          if self.benchmark_cnn.node_index==0:
             apply_op = opt.apply_gradients(
-              [(offload_gradients[self.group_index], v)]
+              [(offload_gradients[self.benchmark_cnn.group_index], v)]
             )
           else:
             apply_op = tf.no_op()
         # reset offload gradient
         reset_op = None
         with tf.control_dependencies([apply_op]):
-          if self.node_index==0:
-            reset_op = offload_gradients[self.group_index].assign(
+          if self.benchmark_cnn.node_index==0:
+            reset_op = offload_gradients[self.benchmark_cnn.group_index].assign(
               tf.zeros(v.shape,dtype=v.dtype.base_dtype)
             )
           else:
@@ -733,14 +738,13 @@ class VariableMgrDistributedReplicated(VariableMgr):
     """Returns a list/dict of savable variables to pass to tf.train.Saver."""
     params = {}
     for v in tf.global_variables():
-      assert (v.name.startswith(PS_SHADOW_VAR_PREFIX + '/v0/') or
-              v.name == 'global_step:0')
-      # We store variables in the checkpoint with the shadow variable prefix
-      # removed so we can evaluate checkpoints in non-distributed replicated
-      # mode. The checkpoints can also be loaded for training in
-      # distributed_replicated mode.
-      name = self._strip_port(self._remove_shadow_var_prefix_if_present(v.name))
-      params[name] = v
+      if (v.name.startswith(PS_SHADOW_VAR_PREFIX + '/v0/') or v.name == 'global_step:0'):
+        # We store variables in the checkpoint with the shadow variable prefix
+        # removed so we can evaluate checkpoints in non-distributed replicated
+        # mode. The checkpoints can also be loaded for training in
+        # distributed_replicated mode.
+        name = self._strip_port(self._remove_shadow_var_prefix_if_present(v.name))
+        params[name] = v
     for v in tf.local_variables():
       # Non-trainable variables, such as batch norm moving averages, do not have
       # corresponding global shadow variables, so we add them here. Trainable
