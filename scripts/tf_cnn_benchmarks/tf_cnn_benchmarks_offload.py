@@ -233,7 +233,7 @@ tf.flags.DEFINE_boolean('use_nccl', True,
 # Distributed training flags.
 tf.flags.DEFINE_string('job_name', 'worker', 'One of "ps", "worker", "".  Empty for local training')
 tf.flags.DEFINE_string('ps_hosts', '192.168.0.57:2222', 'Comma-separated list of target hosts')
-tf.flags.DEFINE_string('worker_hosts', '192.168.0.57:3333', 'Comma-separated list of target hosts')
+tf.flags.DEFINE_string('worker_hosts', '192.168.0.91:3333', 'Comma-separated list of target hosts')
 tf.flags.DEFINE_string('offload_hosts', '192.168.0.57:6666', 'offload process network location')
 tf.flags.DEFINE_integer('task_index', 0, 'Index of task within the job')
 tf.flags.DEFINE_integer('group_index', 0, 'Index of group which this process belongs to')
@@ -241,6 +241,8 @@ tf.flags.DEFINE_integer('node_index', 0, 'Index of node in a group')
 tf.flags.DEFINE_integer('group_size', 1, 'Size of group')
 tf.flags.DEFINE_string('server_protocol', 'grpc', 'protocol for servers')
 tf.flags.DEFINE_boolean('cross_replica_sync', True, '')
+tf.flags.DEFINE_boolean('offload_use_gpu', False, '')
+tf.flags.DEFINE_boolean('offload_enabled', True, '')
 
 # Summary and Save & load checkpoints.
 tf.flags.DEFINE_integer('summary_verbosity', 0,
@@ -449,6 +451,8 @@ class BenchmarkCNN(object):
     self.sync_queue_counter = 0
     self.num_gpus = FLAGS.num_gpus
     self.use_synthetic_gpu_images = self.dataset.use_synthetic_gpu_images()
+    self.offload_use_gpu = FLAGS.offload_use_gpu
+    self.offload_enabled = FLAGS.offload_enabled
 
     if FLAGS.device == 'cpu' and FLAGS.data_format == 'NCHW':
       raise ValueError('--device=cpu requires that --data_format=NHWC')
@@ -523,7 +527,10 @@ class BenchmarkCNN(object):
       num_ps = len(self.ps_hosts)
       self.sync_queue_devices = ['/job:ps/task:%s/cpu:0' % i for i in range(num_ps)]
       num_offload = len(self.offload_hosts)
-      self.offload_devices = ['/job:offload/task:%s/cpu:0' % i for i in range(num_offload)]
+      if self.offload_use_gpu:
+        self.offload_devices = ['/job:offload/task:%s/gpu:0' % i for i in range(num_offload)]
+      else:
+        self.offload_devices = ['/job:offload/task:%s/cpu:0' % i for i in range(num_offload)]
     else:
       self.task_index = 0
       self.cluster = None
