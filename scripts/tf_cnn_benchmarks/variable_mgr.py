@@ -695,8 +695,8 @@ class VariableMgrDistributedReplicated(VariableMgr):
           reset_op = None
           with tf.control_dependencies([apply_op]):
             if self.benchmark_cnn.node_index==0:
-              reset_op = offload_gradients[self.benchmark_cnn.group_index].assign(
-                tf.zeros(v.shape,dtype=v.dtype.base_dtype)
+              reset_op = offload_gradients[self.benchmark_cnn.group_index].assign_sub(
+                offload_gradients[self.benchmark_cnn.group_index]
               )
             else:
               reset_op = tf.no_op()
